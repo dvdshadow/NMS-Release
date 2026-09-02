@@ -35,7 +35,23 @@ Each folder has its own README with detailed instructions. Start with the server
 
 ---
 
-## Quick start
+## Quick start (installers)
+
+The fastest path is the platform installer. It compiles this tree, imports the bundled database,
+copies quests/plugins, downloads maps + [Spire](https://github.com/EQEmu/spire), and writes a
+ready-to-run server folder with start/stop helpers.
+
+| Platform | Command |
+| --- | --- |
+| **Linux** | `sudo ./install.sh` |
+| **Windows** | Run `install.bat` from an elevated PowerShell / cmd |
+
+Full options, layout notes, and post-install steps:
+[install/README.md](install/README.md).
+
+### Manual quick start
+
+If you prefer to do it by hand:
 
 **1. Get a client.** Not included and cannot be — EverQuest client files are Daybreak's. You will
 need the RoF2-era client this server was built against. See

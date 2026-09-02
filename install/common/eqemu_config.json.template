@@ -1,0 +1,87 @@
+{
+  "server": {
+    "zones": {
+      "defaultstatus": "0",
+      "ports": {
+        "low": "7000",
+        "high": "7400"
+      }
+    },
+    "qsdatabase": {
+      "host": "{{DB_HOST}}",
+      "port": "{{DB_PORT}}",
+      "username": "{{DB_USER}}",
+      "password": "{{DB_PASSWORD}}",
+      "db": "{{DB_NAME}}"
+    },
+    "ucs": {
+      "port": "7778",
+      "host": ""
+    },
+    "world": {
+      "loginserver1": {
+        "account": "",
+        "password": "",
+        "legacy": "1",
+        "host": "login.eqemulator.net",
+        "port": "5998"
+      },
+      "loginserver2": {
+        "port": "5999",
+        "account": "",
+        "password": "",
+        "host": "127.0.0.1"
+      },
+      "tcp": {
+        "ip": "0.0.0.0",
+        "port": "9001"
+      },
+      "telnet": {
+        "ip": "0.0.0.0",
+        "port": "9000",
+        "enabled": "true"
+      },
+      "key": "{{WORLD_KEY}}",
+      "shortname": "{{SHORT_NAME}}",
+      "longname": "{{LONG_NAME}}",
+      "address": "{{PUBLIC_ADDRESS}}",
+      "localaddress": "{{LOCAL_ADDRESS}}"
+    },
+    "database": {
+      "db": "{{DB_NAME}}",
+      "host": "{{DB_HOST}}",
+      "port": "{{DB_PORT}}",
+      "username": "{{DB_USER}}",
+      "password": "{{DB_PASSWORD}}"
+    },
+    "files": {
+      "opcodes": "assets/opcodes/opcodes.conf",
+      "mail_opcodes": "assets/opcodes/mail_opcodes.conf"
+    },
+    "directories": {
+      "patches": "assets/patches/",
+      "opcodes": "assets/opcodes/"
+    }
+  },
+  "web-admin": {
+    "launcher": {
+      "runSharedMemory": true,
+      "runLoginserver": true,
+      "runQueryServ": false,
+      "runUcs": true,
+      "isRunning": false,
+      "minZoneProcesses": 10,
+      "staticZones": "butcher,erudnext,freporte,qeynos,freeporte,oot,iceclad,nro,oasis,nedaria,abysmal,natimbi,timorous,firiona,overthere",
+      "updateOpcodesOnStart": false,
+      "deleteLogFilesOlderThanDays": 14
+    },
+    "quests": {
+      "hotReload": true
+    },
+    "serverCodePath": "{{CODE_PATH}}"
+  },
+  "spire": {
+    "http_port": {{SPIRE_PORT}},
+    "launcher_start": false
+  }
+}
