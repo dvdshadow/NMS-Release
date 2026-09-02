@@ -44,7 +44,7 @@ ready-to-run server folder with start/stop helpers.
 | Platform | Command |
 | --- | --- |
 | **Linux** | `sudo ./install.sh` |
-| **Windows** | Run `install.bat` from an elevated PowerShell / cmd |
+| **Windows** | Double-click `install.bat` (approve the UAC prompt) |
 
 Full options, layout notes, and post-install steps:
 [install/README.md](install/README.md).
