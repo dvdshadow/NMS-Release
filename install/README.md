@@ -73,30 +73,30 @@ Passwords and paths are written to `install_config.yaml` in the install folder.
 
 ## Windows
 
-### Requirements
+### One-click install
+
+1. Download / clone this repository onto your PC (GitHub → Code → Download ZIP,
+   then unzip, **or** `git clone`).
+2. Double-click **`install.bat`** at the root of the unzipped folder.
+3. Approve the Windows UAC prompt (Administrator).
+4. Press Enter to accept defaults, or type your own values when asked.
+
+You do **not** need to open PowerShell yourself — `install.bat` does that
+behind the scenes.
+
+### Requirements (install these once beforehand)
 
 - Windows 10/11 x64
-- **Visual Studio 2022** with *Desktop development with C++* (includes CMake)
-- Administrator PowerShell recommended for the first run (winget can install
-  MariaDB + Strawberry Perl)
-- Internet access for maps, Spire, and the first CMake dependency fetch
+- **Visual Studio 2022** with the *Desktop development with C++* workload
+  (includes CMake) — required to compile this custom server
+- Internet access (maps ~1 GB, Spire, and first-time CMake deps)
 
-### Run
+MariaDB and Strawberry Perl are installed automatically via `winget` when
+possible. If winget is unavailable, install them manually and re-run.
 
-From the repository root, in an **elevated** PowerShell:
+### Advanced / scripted installs
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\install.bat
-```
-
-Or:
-
-```powershell
-.\install\windows\install.ps1
-```
-
-Useful parameters:
+PowerShell is still available if you want flags:
 
 ```powershell
 .\install\windows\install.ps1 -SkipMaps -InstallDir 'C:\nms-server'
@@ -105,7 +105,7 @@ Useful parameters:
 
 ### After install
 
-In `%USERPROFILE%\nms-server` (or your `-InstallDir`):
+In `%USERPROFILE%\nms-server` (or your chosen install folder), double-click:
 
 | Script | Purpose |
 | --- | --- |
