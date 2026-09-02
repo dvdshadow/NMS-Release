@@ -13,6 +13,18 @@ of your own — rename it, strip out what you do not want, add whatever you do.
 
 ---
 
+## Automated install
+
+Prefer the repo-root installers if you want a full runtime folder with MariaDB, maps,
+quests/plugins, and **Spire** wired up:
+
+- Linux: `sudo ../install.sh` (from this folder) or `sudo ./install.sh` from the repo root
+- Windows: `install.bat` / `install\windows\install.ps1` from the repo root
+
+See [install/README.md](../install/README.md).
+
+---
+
 ## Building
 
 The build produces the usual EQEmu binaries: `world`, `zone`, `ucs`, `queryserv`,
