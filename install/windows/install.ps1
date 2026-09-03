@@ -1,10 +1,10 @@
 # NMS Server Windows installer
 # Double-click install.bat at the repo root.
-# InstallerRevision 20260903-13
+# InstallerRevision 20260903-15
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$script:InstallerRevision = "20260903-13"
+$script:InstallerRevision = "20260903-15"
 
 if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE "nms-server" }
 if (-not $ShortName) { $ShortName = "NMS" }
@@ -1029,7 +1029,7 @@ function Install-QuestsAndPlugins {
     }
     $linked = $false
     try {
-      New-Item -ItemType Junction -Path $luaDst -Target $luaSrc | Out-Null
+      New-Item -ItemType Junction -Path $luaDst -Value $luaSrc | Out-Null
       $linked = $true
     } catch {
       $linked = $false
@@ -1145,6 +1145,46 @@ function Initialize-Spire {
   }
 }
 
+function Build-SharedMemory {
+  $exe = Join-Path $InstallDir "bin\shared_memory.exe"
+  if (-not (Test-Path $exe)) {
+    Write-WarnMsg "shared_memory.exe is missing. World will log 'Could not load item data' until it is run."
+    return
+  }
+  Write-Step "Building shared memory (items, spells, loot) from the database"
+  $startDb = Join-Path $InstallDir "start_database.ps1"
+  if (Test-Path $startDb) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $startDb
+    if ($LASTEXITCODE -ne 0) {
+      Write-WarnMsg "MariaDB is not listening. shared_memory.exe needs the database. Run build_shared_memory.bat after MariaDB is up."
+      return
+    }
+  }
+  $sharedDir = Join-Path $InstallDir "shared"
+  New-Item -ItemType Directory -Force -Path $sharedDir | Out-Null
+  Get-ChildItem -Path $sharedDir -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+  Push-Location $InstallDir
+  try {
+    & $exe
+    if ($LASTEXITCODE -ne 0) {
+      Write-WarnMsg ("shared_memory.exe exited " + $LASTEXITCODE)
+    }
+  } finally {
+    Pop-Location
+  }
+  $items = Join-Path $InstallDir "shared\items"
+  if (Test-Path $items) {
+    $len = (Get-Item $items).Length
+    if ($len -lt 1024) {
+      Write-WarnMsg ("shared\\items is only " + $len + " bytes (truncated). Delete shared\\* and run build_shared_memory.bat without cancelling.")
+    } else {
+      Write-Ok ("Wrote shared\\items (" + $len + " bytes)")
+    }
+  } else {
+    Write-WarnMsg "shared\\items was not created. From the runtime folder run build_shared_memory.bat, then restart the server."
+  }
+}
+
 function Write-PerlEnvScript {
   $perlRoot = Get-PortablePerlRoot
   $lines = @(
@@ -1234,6 +1274,34 @@ function Write-HelperScripts {
     "@echo off",
     ("start http://127.0.0.1:" + $SpirePort + "/admin")
   )
+  $sharedMem = @(
+    "@echo off",
+    "cd /d `"%~dp0`"",
+    "call `"%~dp0perl_env.bat`"",
+    "call `"%~dp0start_database.bat`"",
+    "if errorlevel 1 (",
+    "  pause",
+    "  exit /b 1",
+    ")",
+    "echo Stopping world/zone so shared files are not locked...",
+    "TASKKILL /IM world.exe /F >nul 2>&1",
+    "TASKKILL /IM zone.exe /F >nul 2>&1",
+    "TASKKILL /IM shared_memory.exe /F >nul 2>&1",
+    "if not exist shared mkdir shared",
+    "echo Removing leftover shared files (a cancelled run leaves a truncated items file)...",
+    "del /q shared\* >nul 2>&1",
+    "echo Building shared memory from the database (items, spells, loot)...",
+    "echo Do not cancel. This can take a few minutes. Cancelling leaves a broken file",
+    "echo that world cannot map (Could not map a view of the shared memory file).",
+    "bin\shared_memory.exe",
+    "if exist shared\items (",
+    "  echo OK  shared\items was written.",
+    "  echo Start the server from Spire so world can load items.",
+    ") else (",
+    "  echo ERR shared\items was not created. Scroll up for errors.",
+    ")",
+    "pause"
+  )
   Set-Content -Path (Join-Path $InstallDir "server_start.bat") -Value $start -Encoding ASCII
   Set-Content -Path (Join-Path $InstallDir "server_stop.bat") -Value $stop -Encoding ASCII
   Set-Content -Path (Join-Path $InstallDir "server_restart.bat") -Value $restart -Encoding ASCII
@@ -1241,6 +1309,7 @@ function Write-HelperScripts {
   Set-Content -Path (Join-Path $InstallDir "spire_stop.bat") -Value $spireStop -Encoding ASCII
   Set-Content -Path (Join-Path $InstallDir "spire_web.bat") -Value $spireWeb -Encoding ASCII
   Set-Content -Path (Join-Path $InstallDir "spire_web_admin.bat") -Value $spireAdmin -Encoding ASCII
+  Set-Content -Path (Join-Path $InstallDir "build_shared_memory.bat") -Value $sharedMem -Encoding ASCII
 }
 
 function Write-InstallConfig {
@@ -1289,6 +1358,9 @@ function Show-Finish {
   Write-Host "1) Double-click spire_start.bat" -ForegroundColor Green
   Write-Host ("2) Open spire_web_admin.bat  (http://127.0.0.1:" + $SpirePort + "/admin)") -ForegroundColor Green
   Write-Host "3) Start the server from Spire, or run server_start.bat" -ForegroundColor Green
+  Write-Host ""
+  Write-Host "If world logs 'Could not load item data' or 'Could not map a view':" -ForegroundColor Green
+  Write-Host "  Run build_shared_memory.bat (do not cancel) then start the server." -ForegroundColor Green
   Write-Host ""
   Write-Host "Client:" -ForegroundColor Green
   Write-Host "  - Point eqhost.txt at your loginserver (RoF2 uses port 5999)" -ForegroundColor Green
@@ -1357,6 +1429,7 @@ Write-Configs -WorldKey $WorldKey
 Download-Maps
 Download-Spire
 Write-HelperScripts
+Build-SharedMemory
 Write-InstallConfig -WorldKey $WorldKey
 Initialize-Spire
 Show-Finish

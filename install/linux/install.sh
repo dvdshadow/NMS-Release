@@ -962,7 +962,49 @@ if command -v xdg-open >/dev/null 2>&1; then
 fi
 echo "\$url"
 EOF
-  chmod 755 "${NMS_INSTALL_DIR}/"{start,stop,restart,start_database,spire_start,spire_stop,spire_web,spire_web_admin}
+  cat > "${NMS_INSTALL_DIR}/build_shared_memory" <<'EOF'
+#!/usr/bin/env bash
+cd "$(dirname "$0")"
+./start_database || exit 1
+echo "Stopping world/zone so shared files are not locked..."
+pkill -x world 2>/dev/null || true
+pkill -x zone 2>/dev/null || true
+pkill -x shared_memory 2>/dev/null || true
+mkdir -p shared
+echo "Removing leftover shared files (a cancelled run leaves a truncated items file)..."
+find shared -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+echo "Building shared memory from the database (items, spells, loot)..."
+echo "Do not interrupt. Cancelling leaves a file world cannot map."
+./bin/shared_memory
+if [[ -f shared/items ]]; then
+  echo "OK  shared/items was written ($(wc -c < shared/items) bytes)."
+  echo "Start the server so world can load items."
+else
+  echo "ERR shared/items was not created. Scroll up for errors."
+  exit 1
+fi
+EOF
+  chmod 755 "${NMS_INSTALL_DIR}/"{start,stop,restart,start_database,spire_start,spire_stop,spire_web,spire_web_admin,build_shared_memory}
+}
+
+build_shared_memory() {
+  log "Building shared memory (items, spells, loot) from the database"
+  mkdir -p "${NMS_INSTALL_DIR}/shared"
+  find "${NMS_INSTALL_DIR}/shared" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  if [[ ! -x "${NMS_INSTALL_DIR}/bin/shared_memory" ]]; then
+    warn "shared_memory is missing. World will log 'Could not load item data' until it is run."
+    return 0
+  fi
+  (
+    cd "${NMS_INSTALL_DIR}"
+    ./start_database || { warn "MariaDB is not listening; shared_memory needs the database."; exit 1; }
+    ./bin/shared_memory || warn "shared_memory exited non-zero"
+  ) || warn "shared_memory did not complete"
+  if [[ -f "${NMS_INSTALL_DIR}/shared/items" ]]; then
+    ok "Wrote shared/items ($(wc -c < "${NMS_INSTALL_DIR}/shared/items") bytes)"
+  else
+    warn "shared/items was not created. From the runtime folder run ./build_shared_memory, then restart."
+  fi
 }
 
 write_install_config() {
@@ -1023,6 +1065,10 @@ Spire admin (from any machine that can reach this host, or via SSH tunnel):
   ./stop
   ./restart
 
+If world logs 'Could not load item data':
+  ./stop && ./build_shared_memory && ./start
+  Do not interrupt shared_memory; a cancelled run leaves a truncated file.
+
 Client notes:
   - Point eqhost.txt at your loginserver (port 5999 for RoF2)
   - Copy Release-NMS-Client/ClientFiles overlay onto your RoF2 client
@@ -1058,6 +1104,7 @@ main() {
   download_maps
   download_spire
   write_helper_scripts
+  build_shared_memory
   write_install_config
   init_spire
   maybe_install_cron

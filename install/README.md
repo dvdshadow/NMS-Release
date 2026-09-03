@@ -75,6 +75,7 @@ cd /opt/nms-server   # or ~/nms-server if you installed as a normal user
 ./spire_start
 ./start
 ./stop
+./build_shared_memory   # if world logs "Could not load item data"
 ```
 
 There is no desktop browser on a headless host. Tunnel Spire if you need the UI:
@@ -141,6 +142,16 @@ In `%USERPROFILE%\nms-server` (or your chosen install folder), double-click:
 | `server_start.bat` | Starts the game server via Spire |
 | `server_stop.bat` | Stops the game server |
 | `server_restart.bat` | Restarts the game server |
+| `build_shared_memory.bat` | Rebuilds `shared\items` (and spells/loot) from MariaDB |
+
+World does **not** load items from SQL at boot. It memory-maps `shared\items`,
+which `shared_memory.exe` writes. If world logs `Could not load item data` or
+`Could not map a view of the shared memory file`, the mmap file is missing or
+truncated (cancelling `shared_memory.exe` does that). Stop world, run
+`build_shared_memory.bat` from the runtime folder (not from `bin\`), wait for
+it to finish, then start again. Do not double-click `bin\shared_memory.exe` in
+Explorer — the working directory must be the runtime root so it finds
+`eqemu_config.json`.
 
 ---
 
