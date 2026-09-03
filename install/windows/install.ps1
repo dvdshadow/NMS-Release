@@ -1,6 +1,7 @@
 ﻿#Requires -Version 5.1
 # NMS Server Windows installer (ASCII-only so Windows PowerShell 5.1 can parse it).
 # Double-click install.bat at the repo root. You do not need to run this file by hand.
+$script:InstallerRevision = "20260903-4"
 
 [CmdletBinding()]
 param(
@@ -249,7 +250,61 @@ function Test-MysqlPortOpen {
   }
 }
 
+function Ensure-MariaDbWindowsInstance {
+  $mysql = Get-MysqlExe
+  if (-not $mysql) {
+    return
+  }
+  $binDir = Split-Path -Parent $mysql
+  $installRoot = Split-Path -Parent $binDir
+  $dataDir = Join-Path $installRoot "data"
+  $services = Get-DatabaseServices
+  if ($services.Count -gt 0) {
+    return
+  }
+
+  Write-Step "MariaDB files are installed, but no Windows service exists yet. Creating one."
+  $installDb = Join-Path $binDir "mariadb-install-db.exe"
+  if (-not (Test-Path $installDb)) {
+    $installDb = Join-Path $binDir "mysql_install_db.exe"
+  }
+  $mysqld = Join-Path $binDir "mysqld.exe"
+  if (-not (Test-Path $mysqld)) {
+    $mysqld = Join-Path $binDir "mariadbd.exe"
+  }
+
+  $hasData = $false
+  if (Test-Path $dataDir) {
+    $hasData = (@(Get-ChildItem -Path $dataDir -ErrorAction SilentlyContinue).Count -gt 0)
+  }
+
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
+  try {
+    if ((Test-Path $installDb) -and -not $hasData) {
+      $installArgs = @(
+        ("--datadir=" + $dataDir),
+        "--service=MariaDB",
+        ("--port=" + $DbPort)
+      )
+      if ($DbRootPassword) {
+        $installArgs += ("--password=" + $DbRootPassword)
+      }
+      Write-Step ("Initializing MariaDB instance with " + (Split-Path -Leaf $installDb))
+      & $installDb @installArgs | Out-Host
+    } elseif (Test-Path $mysqld) {
+      Write-Step "Registering existing MariaDB data directory as a Windows service"
+      & $mysqld --install MariaDB | Out-Host
+    } else {
+      Write-WarnMsg "Could not find mariadb-install-db.exe or mysqld.exe next to mysql.exe."
+    }
+  } finally {
+    $ErrorActionPreference = $old
+  }
+}
+
 function Start-DatabaseService {
+  Ensure-MariaDbWindowsInstance
   $services = Get-DatabaseServices
   if ($services.Count -eq 0) {
     Write-WarnMsg "No MariaDB/MySQL Windows service was found yet."
@@ -751,6 +806,7 @@ function Show-Banner {
   Write-Host ""
   Write-Host "--------------------------------------------------------------------------------" -ForegroundColor Cyan
   Write-Host "|  NMS Server Windows Installer                                                |" -ForegroundColor Cyan
+  Write-Host ("|  Revision " + $script:InstallerRevision + "                                                         |") -ForegroundColor Cyan
   Write-Host "|  Builds this release + installs Spire for admin / content editing            |" -ForegroundColor Cyan
   Write-Host "--------------------------------------------------------------------------------" -ForegroundColor Cyan
   Write-Host ("Source:   " + $SourceDir) -ForegroundColor Cyan
@@ -779,6 +835,7 @@ function Show-Finish {
   Write-Host ""
 }
 
+Write-Host ("NMS Windows installer revision " + $script:InstallerRevision) -ForegroundColor Yellow
 Require-RepoLayout
 Show-Banner
 
