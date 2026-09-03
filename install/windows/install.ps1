@@ -1,10 +1,10 @@
 # NMS Server Windows installer
 # Double-click install.bat at the repo root.
-# InstallerRevision 20260903-8
+# InstallerRevision 20260903-9
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$script:InstallerRevision = "20260903-8"
+$script:InstallerRevision = "20260903-9"
 
 if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE "nms-server" }
 if (-not $ShortName) { $ShortName = "NMS" }
@@ -514,19 +514,241 @@ function Configure-Database {
   }
 }
 
+function Get-Vswhere {
+  $candidates = @(
+    (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"),
+    (Join-Path ${env:ProgramFiles} "Microsoft Visual Studio\Installer\vswhere.exe")
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      return $candidate
+    }
+  }
+  return $null
+}
+
+function Invoke-VswhereQuery {
+  param([string[]]$QueryArgs)
+  $vswhere = Get-Vswhere
+  if (-not $vswhere) {
+    return $null
+  }
+  $out = & $vswhere @QueryArgs
+  if ($out) {
+    return ([string]$out).Trim()
+  }
+  return $null
+}
+
+function Get-VisualStudioInstallRoots {
+  $roots = @()
+  foreach ($pf in @(${env:ProgramFiles}, ${env:ProgramFiles(x86)})) {
+    if (-not $pf) {
+      continue
+    }
+    $vsRoot = Join-Path $pf "Microsoft Visual Studio"
+    if (Test-Path $vsRoot) {
+      $roots += $vsRoot
+    }
+  }
+  return $roots
+}
+
+function Find-VisualStudioByFilesystem {
+  $preferred = @()
+  $others = @()
+  foreach ($root in Get-VisualStudioInstallRoots) {
+    $yearDirs = @(Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue)
+    foreach ($yearDir in $yearDirs) {
+      if ($yearDir.Name -eq "Installer") {
+        continue
+      }
+      $editionDirs = @(Get-ChildItem -Path $yearDir.FullName -Directory -ErrorAction SilentlyContinue)
+      foreach ($editionDir in $editionDirs) {
+        $vcvars = Join-Path $editionDir.FullName "VC\Auxiliary\Build\vcvarsall.bat"
+        if (-not (Test-Path $vcvars)) {
+          continue
+        }
+        if ($yearDir.Name -match "^(18|2026|17|2022)$") {
+          $preferred += $editionDir.FullName
+        } else {
+          $others += $editionDir.FullName
+        }
+      }
+    }
+  }
+  if ($preferred.Count -gt 0) {
+    return $preferred[0]
+  }
+  if ($others.Count -gt 0) {
+    return $others[0]
+  }
+  return $null
+}
+
+function Get-VisualStudioPath {
+  $requiresSets = @(
+    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+    "Microsoft.Component.MSBuild"
+  )
+  $flagSets = @(
+    @("-latest", "-products", "*", "-prerelease"),
+    @("-latest", "-products", "*")
+  )
+  foreach ($flags in $flagSets) {
+    foreach ($req in $requiresSets) {
+      $query = $flags + @("-requires", $req, "-property", "installationPath")
+      $vsPath = Invoke-VswhereQuery -QueryArgs $query
+      if ($vsPath) {
+        return $vsPath
+      }
+    }
+    $query = $flags + @("-property", "installationPath")
+    $vsPath = Invoke-VswhereQuery -QueryArgs $query
+    if ($vsPath) {
+      return $vsPath
+    }
+  }
+  return Find-VisualStudioByFilesystem
+}
+
+function Get-BundledCmake {
+  param([string]$VsPath)
+  if (-not $VsPath) {
+    return $null
+  }
+  $bundled = Join-Path $VsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+  if (Test-Path $bundled) {
+    return $bundled
+  }
+  return $null
+}
+
 function Find-CMake {
+  $vsPath = Get-VisualStudioPath
+  $bundled = Get-BundledCmake -VsPath $vsPath
+  if ($bundled) {
+    return $bundled
+  }
+  foreach ($root in Get-VisualStudioInstallRoots) {
+    $yearDirs = @(Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue)
+    foreach ($yearDir in $yearDirs) {
+      $editionDirs = @(Get-ChildItem -Path $yearDir.FullName -Directory -ErrorAction SilentlyContinue)
+      foreach ($editionDir in $editionDirs) {
+        $extra = Get-BundledCmake -VsPath $editionDir.FullName
+        if ($extra) {
+          return $extra
+        }
+      }
+    }
+  }
+  $standalone = Join-Path ${env:ProgramFiles} "CMake\bin\cmake.exe"
+  if (Test-Path $standalone) {
+    return $standalone
+  }
   $cmd = Get-Command cmake -ErrorAction SilentlyContinue
   if ($cmd) {
     return $cmd.Source
   }
-  $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-  if (Test-Path $vswhere) {
-    $vsPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
-    if ($vsPath) {
-      $try = Join-Path $vsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
-      if (Test-Path $try) {
-        return $try
+  return $null
+}
+
+function Find-Ninja {
+  param([string]$VsPath)
+  if ($VsPath) {
+    $bundled = Join-Path $VsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
+    if (Test-Path $bundled) {
+      return $bundled
+    }
+  }
+  $cmd = Get-Command ninja -ErrorAction SilentlyContinue
+  if ($cmd) {
+    return $cmd.Source
+  }
+  return $null
+}
+
+function Get-CmakeVisualStudioGenerators {
+  param([string]$CmakeExe)
+  $help = & $CmakeExe --help
+  $found = @()
+  foreach ($line in $help) {
+    if ($line -match "Visual Studio [0-9]+ [0-9]+") {
+      $name = $Matches[0]
+      if ($found -notcontains $name) {
+        $found += $name
       }
+    }
+  }
+  return @($found | Sort-Object {
+    $yearMatch = [regex]::Match($_, "(\d{4})$")
+    if ($yearMatch.Success) {
+      [int]$yearMatch.Groups[1].Value
+    } else {
+      0
+    }
+  } -Descending)
+}
+
+function Remove-CmakeBuildDir {
+  param([string]$BuildDir)
+  if (-not (Test-Path $BuildDir)) {
+    return
+  }
+  Write-Step "Removing previous CMake Build folder so a stale generator is not reused"
+  Remove-Item -Recurse -Force $BuildDir -ErrorAction SilentlyContinue
+  if (Test-Path $BuildDir) {
+    Die ("Could not delete " + $BuildDir + ". Close Visual Studio or cmake if they are open, then re-run.")
+  }
+}
+
+function Import-VsDevEnvironment {
+  param([string]$VsPath)
+  if (-not $VsPath) {
+    return $false
+  }
+  $vcvars = Join-Path $VsPath "VC\Auxiliary\Build\vcvarsall.bat"
+  $cmdLine = $null
+  if (Test-Path $vcvars) {
+    $cmdLine = "call `"" + $vcvars + "`" x64 && set"
+  } else {
+    $vsdev = Join-Path $VsPath "Common7\Tools\VsDevCmd.bat"
+    if (-not (Test-Path $vsdev)) {
+      return $false
+    }
+    $cmdLine = "call `"" + $vsdev + "`" -arch=x64 -host_arch=x64 && set"
+  }
+  Write-Step "Loading Visual Studio x64 compiler environment"
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
+  try {
+    cmd.exe /c $cmdLine | ForEach-Object {
+      if ($_ -match "^([^=]+)=(.*)$") {
+        [System.Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], "Process")
+      }
+    }
+  } finally {
+    $ErrorActionPreference = $old
+  }
+  $cl = Get-Command cl.exe -ErrorAction SilentlyContinue
+  if ($cl) {
+    Write-Ok ("Compiler: " + $cl.Source)
+    return $true
+  }
+  Write-WarnMsg "Visual Studio environment loaded, but cl.exe was not found on PATH."
+  return $false
+}
+
+function Get-ServerBinDir {
+  $candidates = @(
+    (Join-Path $SourceDir "Build\bin\Release"),
+    (Join-Path $SourceDir "Build\bin\RelWithDebInfo"),
+    (Join-Path $SourceDir "Build\bin\Debug"),
+    (Join-Path $SourceDir "Build\bin")
+  )
+  foreach ($c in $candidates) {
+    if (Test-Path (Join-Path $c "world.exe")) {
+      return $c
     }
   }
   return $null
@@ -535,26 +757,46 @@ function Find-CMake {
 function Build-Server {
   if ($SkipBuild) {
     Write-WarnMsg "Skipping build"
-    $world = Join-Path $SourceDir "Build\bin\Release\world.exe"
-    if (-not (Test-Path $world)) {
-      Die ("Missing " + $world)
+    $binDir = Get-ServerBinDir
+    if (-not $binDir) {
+      Die ("Missing world.exe under " + (Join-Path $SourceDir "Build\bin"))
     }
     return
   }
 
   Write-Step "Building server with CMake / Visual Studio"
-  $cmake = Find-CMake
-  if (-not $cmake) {
-    Die "CMake not found. Install Visual Studio (2022 or newer) with the Desktop development with C++ workload."
+  $vsPath = Get-VisualStudioPath
+  if ($vsPath) {
+    Write-Ok ("Using Visual Studio at " + $vsPath)
+  } else {
+    Write-WarnMsg "Visual Studio was not found by vswhere or in Program Files."
   }
 
+  $cmake = Find-CMake
+  if (-not $cmake) {
+    Die "CMake not found. Install Visual Studio with Desktop development with C++ and re-run."
+  }
+  Write-Ok ("Using CMake at " + $cmake)
+  $verLine = @(& $cmake --version) | Select-Object -First 1
+  if ($verLine) {
+    Write-Ok $verLine
+  }
+  if ($cmake -notmatch "Microsoft Visual Studio") {
+    Write-WarnMsg "This CMake is not the copy bundled with Visual Studio. An old PATH CMake cannot generate Visual Studio 2026 projects."
+  }
+
+  $buildDir = Join-Path $SourceDir "Build"
+  Remove-CmakeBuildDir -BuildDir $buildDir
+
+  $generators = @(Get-CmakeVisualStudioGenerators -CmakeExe $cmake)
+  if ($generators.Count -gt 0) {
+    Write-Ok ("CMake Visual Studio generators: " + ($generators -join ", "))
+  }
+
+  $script:UsedNinja = $false
   Push-Location $SourceDir
   try {
     $configured = $false
-    $generators = @(
-      "Visual Studio 18 2026",
-      "Visual Studio 17 2022"
-    )
     foreach ($gen in $generators) {
       Write-Step ("Configuring with CMake generator: " + $gen)
       & $cmake -S . -B Build -G $gen -A x64 -DEQEMU_BUILD_LOGIN=ON
@@ -562,19 +804,49 @@ function Build-Server {
         $configured = $true
         break
       }
-      Write-WarnMsg ($gen + " failed, trying the next Visual Studio generator")
+      Write-WarnMsg ($gen + " failed, trying the next generator")
+      Remove-CmakeBuildDir -BuildDir $buildDir
     }
+
     if (-not $configured) {
-      Write-Step "Configuring with CMake default generator"
-      & $cmake -S . -B Build -A x64 -DEQEMU_BUILD_LOGIN=ON
-      if ($LASTEXITCODE -eq 0) {
-        $configured = $true
+      Write-Step "Visual Studio generators failed. Trying Ninja with the Visual Studio compiler."
+      if (-not (Import-VsDevEnvironment -VsPath $vsPath)) {
+        Die "CMake could not find Visual Studio. Confirm Desktop development with C++ is installed, then re-run. Close any leftover Build folder first."
+      }
+      $ninja = Find-Ninja -VsPath $vsPath
+      if ($ninja) {
+        $ninjaDir = Split-Path -Parent $ninja
+        $env:Path = $ninjaDir + ";" + $env:Path
+        Write-Ok ("Using Ninja at " + $ninja)
+        Write-Step "Configuring with CMake generator: Ninja"
+        & $cmake -S . -B Build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM=$ninja -DEQEMU_BUILD_LOGIN=ON
+        if ($LASTEXITCODE -eq 0) {
+          $configured = $true
+          $script:UsedNinja = $true
+        } else {
+          Remove-CmakeBuildDir -BuildDir $buildDir
+        }
       }
     }
+
     if (-not $configured) {
-      Die "CMake configure failed. Install Visual Studio with Desktop development with C++ and re-run."
+      Write-Step "Configuring with CMake generator: NMake Makefiles"
+      & $cmake -S . -B Build -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DEQEMU_BUILD_LOGIN=ON
+      if ($LASTEXITCODE -eq 0) {
+        $configured = $true
+        $script:UsedNinja = $true
+      }
     }
-    & $cmake --build Build --config Release --parallel $Jobs
+
+    if (-not $configured) {
+      Die "CMake could not configure the build. Install Visual Studio (2022 or 2026) with Desktop development with C++, then re-run."
+    }
+
+    if ($script:UsedNinja) {
+      & $cmake --build Build --parallel $Jobs
+    } else {
+      & $cmake --build Build --config Release --parallel $Jobs
+    }
     if ($LASTEXITCODE -ne 0) {
       Die "CMake build failed"
     }
@@ -582,7 +854,7 @@ function Build-Server {
     Pop-Location
   }
 
-  if (-not (Test-Path (Join-Path $SourceDir "Build\bin\Release\world.exe"))) {
+  if (-not (Get-ServerBinDir)) {
     Die "Build finished but world.exe is missing"
   }
   Write-Ok "Server built"
@@ -610,7 +882,11 @@ function New-RuntimeLayout {
 
 function Install-Binaries {
   Write-Step ("Installing binaries into " + (Join-Path $InstallDir "bin"))
-  $srcBin = Join-Path $SourceDir "Build\bin\Release"
+  $srcBin = Get-ServerBinDir
+  if (-not $srcBin) {
+    Die ("world.exe not found under " + (Join-Path $SourceDir "Build\bin"))
+  }
+  Write-Ok ("Copying binaries from " + $srcBin)
   $names = @(
     "world",
     "zone",

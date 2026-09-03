@@ -87,8 +87,9 @@ behind the scenes.
 ### Requirements (install these once beforehand)
 
 - Windows 10/11 x64
-- **Visual Studio 2022** with the *Desktop development with C++* workload
-  (includes CMake) — required to compile this custom server
+- **Visual Studio 2022 or 2026** with the *Desktop development with C++*
+  workload (includes CMake) — required to compile this custom server.
+  Community is enough. You do not need to open the Visual Studio IDE.
 - Internet access (maps ~1 GB, Spire, and first-time CMake deps)
 
 MariaDB and Strawberry Perl are installed automatically via `winget` when

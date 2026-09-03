@@ -34,8 +34,8 @@ Verified to compile clean with **MSVC 2022**, **clang 14**, and **GCC 12**.
 
 ### Windows
 
-You need **Visual Studio 2022** with the *Desktop development with C++* workload. That
-workload includes CMake, so there is usually nothing else to install.
+You need **Visual Studio 2022 or 2026** with the *Desktop development with C++*
+workload. That workload includes CMake, so there is usually nothing else to install.
 
 Run:
 
