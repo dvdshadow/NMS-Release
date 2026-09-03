@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 # NMS Server Windows installer (ASCII-only so Windows PowerShell 5.1 can parse it).
 # Double-click install.bat at the repo root. You do not need to run this file by hand.
-$script:InstallerRevision = "20260903-4"
+# InstallerRevision 20260903-5
 
 [CmdletBinding()]
 param(
@@ -30,6 +30,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+$script:InstallerRevision = "20260903-5"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
