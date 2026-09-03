@@ -23,7 +23,11 @@ if (-not $LocalAddress) { $LocalAddress = "127.0.0.1" }
 if (-not $Jobs) { $Jobs = [Environment]::ProcessorCount }
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+if ($env:NMS_REPO_ROOT) {
+  $RepoRoot = $env:NMS_REPO_ROOT
+} else {
+  $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+}
 $CommonDir = (Resolve-Path (Join-Path $ScriptDir "..\common")).Path
 $SourceDir = Join-Path $RepoRoot "Release-NMS-Server"
 $QuestsSrc = Join-Path $RepoRoot "Release-NMS-Quests"
