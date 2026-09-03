@@ -60,35 +60,53 @@ IF(EQEMU_FETCH_MSVC_DEPENDENCIES_VCPKG)
 ENDIF()
 
 IF(EQEMU_FETCH_MSVC_DEPENDENCIES_PERL)
-	#Try to find perl first, (so you can use your active install first)
-	FIND_PACKAGE(PerlLibs)
-	
-	IF(NOT PerlLibs_FOUND)
-		MESSAGE(STATUS "Resolving perl dependencies...")
-		
-		IF(NOT EXISTS ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_ZIP})
-			EXECUTE_PROCESS(COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_SOURCE_DIR}/perl)
-			EXECUTE_PROCESS(COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_DIR})
-			
-			MESSAGE(STATUS "Downloading portable perl...")
-			FILE(DOWNLOAD ${EQEMU_PERL_URL} ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_ZIP} 
+	# Always use the portable Strawberry 5.24 that EQEmu ships for MSVC.
+	# A winget/system install (5.38/5.40) is found first by FindPerlLibs, and
+	# those headers call Perl_switch_locale_context. MSVC then looks for
+	# __imp_Perl_switch_locale_context, which Strawberry's MinGW import
+	# library does not provide. That produces LNK2019 in zone/embperl.cpp.
+	MESSAGE(STATUS "Using portable Strawberry Perl 5.24 for MSVC linking")
+
+	IF(NOT EXISTS ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_ZIP})
+		EXECUTE_PROCESS(COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_SOURCE_DIR}/perl)
+		EXECUTE_PROCESS(COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_DIR})
+
+		SET(EQEMU_PERL_URLS "${EQEMU_PERL_URL}")
+		STRING(REPLACE "http://" "https://" EQEMU_PERL_URL_HTTPS "${EQEMU_PERL_URL}")
+		IF(NOT EQEMU_PERL_URL_HTTPS STREQUAL EQEMU_PERL_URL)
+			SET(EQEMU_PERL_URLS "${EQEMU_PERL_URL_HTTPS};${EQEMU_PERL_URL}")
+		ENDIF()
+
+		SET(PERL_DOWNLOAD_OK FALSE)
+		FOREACH(PERL_TRY_URL ${EQEMU_PERL_URLS})
+			MESSAGE(STATUS "Downloading portable perl from ${PERL_TRY_URL}")
+			FILE(DOWNLOAD ${PERL_TRY_URL} ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_ZIP}
 				SHOW_PROGRESS
 				STATUS DOWNLOAD_STATUS)
-				
 			LIST(GET DOWNLOAD_STATUS 0 STATUS_CODE)
-			IF(NOT STATUS_CODE EQUAL 0)
-				MESSAGE(FATAL_ERROR "Was unable to download dependencies from ${EQEMU_PERL_URL}")
+			IF(STATUS_CODE EQUAL 0)
+				SET(PERL_DOWNLOAD_OK TRUE)
+				BREAK()
 			ENDIF()
-			
-			MESSAGE(STATUS "Extracting files...")
-			EXECUTE_PROCESS(
-				COMMAND ${CMAKE_COMMAND} -E tar xzf ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_ZIP}
-				WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_DIR}
-			)
+			MESSAGE(STATUS "Download failed from ${PERL_TRY_URL} (status ${STATUS_CODE})")
+			FILE(REMOVE ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_ZIP})
+		ENDFOREACH()
+
+		IF(NOT PERL_DOWNLOAD_OK)
+			MESSAGE(FATAL_ERROR "Was unable to download portable Perl from ${EQEMU_PERL_URL}")
 		ENDIF()
-		
-		SET(PERL_EXECUTABLE ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_DIR}/perl/bin/perl.exe CACHE FILEPATH "Path to perl program" FORCE)
-		SET(PERL_INCLUDE_PATH ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_DIR}/perl/lib/CORE CACHE PATH "Path to perl include files" FORCE)
-		SET(PERL_LIBRARY ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_DIR}/perl/lib/CORE/libperl524.a CACHE FILEPATH "Path to perl library" FORCE)
+
+		MESSAGE(STATUS "Extracting files...")
+		EXECUTE_PROCESS(
+			COMMAND ${CMAKE_COMMAND} -E tar xzf ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_ZIP}
+			WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_DIR}
+		)
 	ENDIF()
+
+	SET(PERL_EXECUTABLE ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_DIR}/perl/bin/perl.exe CACHE FILEPATH "Path to perl program" FORCE)
+	SET(PERL_INCLUDE_PATH ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_DIR}/perl/lib/CORE CACHE PATH "Path to perl include files" FORCE)
+	SET(PERL_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_DIR}/perl/lib/CORE CACHE PATH "Path to perl include files" FORCE)
+	SET(PERL_LIBRARY ${PROJECT_SOURCE_DIR}/perl/${EQEMU_PERL_DIR}/perl/lib/CORE/libperl524.a CACHE FILEPATH "Path to perl library" FORCE)
+	MESSAGE(STATUS "MSVC portable Perl: ${PERL_EXECUTABLE}")
+	MESSAGE(STATUS "MSVC portable Perl library: ${PERL_LIBRARY}")
 ENDIF()

@@ -1,44 +1,47 @@
 @echo off
 setlocal EnableExtensions
-REM =============================================================================
-REM  NMS Server — Windows one-click installer
-REM
-REM  Double-click this file after downloading/cloning the repo.
-REM  It will ask for Administrator permission (UAC), then walk you through
-REM  the install. You do not need to open PowerShell yourself.
-REM =============================================================================
+REM NMS Server - Windows one-click installer
 
 cd /d "%~dp0"
+set "NMS_REPO_ROOT=%cd%"
 
-REM Re-launch elevated if we are not already admin.
 net session >nul 2>&1
 if %errorLevel% NEQ 0 (
     echo.
     echo  NMS Server Installer
-    echo  --------------------
-    echo  Administrator permission is required to install MariaDB / Perl
-    echo  and configure the server. Windows will show a UAC prompt next.
+    echo  Administrator permission is required. Windows will show a UAC prompt.
     echo.
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "Start-Process -FilePath '%~f0' -Verb RunAs"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
     exit /b
 )
 
-REM Keep a readable console and run the real installer.
 title NMS Server Installer
 color 0B
 echo.
 echo  ============================================================
 echo   NMS Server Installer
 echo  ============================================================
-echo   You can accept the defaults by pressing Enter at each prompt.
-echo   This will compile the server, import the database, download
-echo   maps + Spire, and create a runnable folder under your user
-echo   profile (default: %%USERPROFILE%%\nms-server).
-echo  ============================================================
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install\windows\install.ps1" %*
+set "PS1=%~dp0install\windows\install.ps1"
+if not exist "%PS1%" (
+    echo  ERROR: missing %PS1%
+    echo  Run this from a full clone or unzip of the NMS-Release repository.
+    pause
+    exit /b 1
+)
+
+findstr /C:"CmdletBinding" "%PS1%" >nul
+if not errorlevel 1 (
+    echo  ERROR: install.ps1 contains CmdletBinding and will not run on Windows PowerShell 5.1.
+    pause
+    exit /b 1
+)
+
+echo  Using local installer script:
+echo  %PS1%
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.

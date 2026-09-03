@@ -60,7 +60,13 @@
     },
     "directories": {
       "patches": "assets/patches/",
-      "opcodes": "assets/opcodes/"
+      "opcodes": "assets/opcodes/",
+      "maps": "maps/",
+      "quests": "quests/",
+      "plugins": "plugins/",
+      "lua_modules": "quests/lua_modules/",
+      "shared_memory": "shared/",
+      "logs": "logs/"
     }
   },
   "web-admin": {

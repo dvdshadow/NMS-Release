@@ -1,0 +1,4 @@
+# Windows installer files must stay CRLF so Windows PowerShell 5.1 can parse them.
+install.bat text eol=crlf
+install/windows/*.ps1 text eol=crlf
+install/windows/*.bat text eol=crlf
