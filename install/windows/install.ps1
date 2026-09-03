@@ -1,10 +1,10 @@
 # NMS Server Windows installer
 # Double-click install.bat at the repo root.
-# InstallerRevision 20260903-11
+# InstallerRevision 20260903-12
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$script:InstallerRevision = "20260903-11"
+$script:InstallerRevision = "20260903-12"
 
 if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE "nms-server" }
 if (-not $ShortName) { $ShortName = "NMS" }
@@ -935,6 +935,63 @@ function Install-Binaries {
       Write-WarnMsg ("Optional binary not found: " + $name + ".exe")
     }
   }
+  Install-RuntimeDlls
+}
+
+function Copy-DllsIntoRuntime {
+  param([string]$From, [string]$To)
+  $copied = 0
+  if (-not (Test-Path $From)) {
+    return 0
+  }
+  $files = @(Get-ChildItem -Path $From -Filter "*.dll" -File -ErrorAction SilentlyContinue)
+  foreach ($file in $files) {
+    Copy-Item $file.FullName (Join-Path $To $file.Name) -Force
+    $copied += 1
+  }
+  if ($copied -gt 0) {
+    Write-Ok ($copied.ToString() + " DLL(s) from " + $From)
+  }
+  return $copied
+}
+
+function Install-RuntimeDlls {
+  $dest = Join-Path $InstallDir "bin"
+  Write-Step ("Copying runtime DLLs into " + $dest)
+  $total = 0
+  $srcBin = Get-ServerBinDir
+  if ($srcBin) {
+    $total += Copy-DllsIntoRuntime -From $srcBin -To $dest
+  }
+  $vcpkgDirs = @(
+    (Join-Path $SourceDir "vcpkg\vcpkg-export-x64\installed\x64-windows\bin"),
+    (Join-Path $SourceDir "vcpkg\vcpkg-export-x64\installed\x64-windows\tools"),
+    (Join-Path $SourceDir "vcpkg\vcpkg-export-x64\installed\x64-windows\tools\openssl"),
+    (Join-Path $SourceDir "vcpkg\vcpkg-export-x86\installed\x86-windows\bin")
+  )
+  foreach ($dir in $vcpkgDirs) {
+    $total += Copy-DllsIntoRuntime -From $dir -To $dest
+  }
+  $perlRoot = Get-PortablePerlRoot
+  if ($perlRoot) {
+    $total += Copy-DllsIntoRuntime -From (Join-Path $perlRoot "perl\bin") -To $dest
+    $total += Copy-DllsIntoRuntime -From (Join-Path $perlRoot "c\bin") -To $dest
+  }
+  $mariaRoots = @()
+  if (${env:ProgramFiles}) { $mariaRoots += ${env:ProgramFiles} }
+  if (${env:ProgramFiles(x86)}) { $mariaRoots += ${env:ProgramFiles(x86)} }
+  foreach ($root in $mariaRoots) {
+    $dirs = @(Get-ChildItem -Path $root -Directory -Filter "MariaDB*" -ErrorAction SilentlyContinue)
+    foreach ($dir in $dirs) {
+      $total += Copy-DllsIntoRuntime -From (Join-Path $dir.FullName "lib") -To $dest
+      $total += Copy-DllsIntoRuntime -From (Join-Path $dir.FullName "bin") -To $dest
+    }
+  }
+  if ($total -eq 0) {
+    Write-WarnMsg "No runtime DLLs were copied. world.exe may fail with exit code 0xc0000135."
+  } else {
+    Write-Ok ("Copied " + $total + " runtime DLL(s)")
+  }
 }
 
 function Copy-Tree {
@@ -1077,8 +1134,13 @@ function Write-PerlEnvScript {
   if ($perlRoot) {
     $perlBin = Join-Path $perlRoot "perl\bin"
     $cBin = Join-Path $perlRoot "c\bin"
-    $lines += ("set `"PATH=" + $perlBin + ";" + $cBin + ";%PATH%`"")
-    $env:Path = $perlBin + ";" + $cBin + ";" + $env:Path
+    $vcpkgBin = Join-Path $SourceDir "vcpkg\vcpkg-export-x64\installed\x64-windows\bin"
+    $pathExtra = $perlBin + ";" + $cBin
+    if (Test-Path $vcpkgBin) {
+      $pathExtra = $vcpkgBin + ";" + $pathExtra
+    }
+    $lines += ("set `"PATH=" + $pathExtra + ";%PATH%`"")
+    $env:Path = $pathExtra + ";" + $env:Path
     Write-Ok ("Perl runtime PATH: " + $perlBin)
   } else {
     $lines += "REM portable perl524.dll was not found under Release-NMS-Server\perl"
@@ -1090,7 +1152,7 @@ function Write-PerlEnvScript {
 function Write-HelperScripts {
   Write-Step "Writing helper scripts"
   Write-PerlEnvScript
-  foreach ($helper in @("start_database.bat", "start_database.ps1")) {
+  foreach ($helper in @("start_database.bat", "start_database.ps1", "copy_runtime_dlls.ps1")) {
     $src = Join-Path $ScriptDir $helper
     if (Test-Path $src) {
       Copy-Item $src (Join-Path $InstallDir $helper) -Force

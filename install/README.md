@@ -109,6 +109,10 @@ behind the scenes.
 - **Visual Studio 2022 or 2026** with the *Desktop development with C++*
   workload (includes CMake) — required to compile this custom server.
   Community is enough. You do not need to open the Visual Studio IDE.
+  The installer copies `libsodium.dll`, `libmariadb.dll`, `lua51.dll`,
+  `perl524.dll`, and other runtime DLLs into the server `bin\` folder.
+  If Spire preflight is green but processes exit `0xc0000135`, those
+  DLLs are missing — run `install\windows\copy_runtime_dlls.ps1`.
 - Internet access (maps ~1 GB, Spire, and first-time CMake deps)
 
 MariaDB is installed automatically via `winget` when possible. The Windows
