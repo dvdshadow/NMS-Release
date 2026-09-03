@@ -1,10 +1,10 @@
 # NMS Server Windows installer
 # Double-click install.bat at the repo root.
-# InstallerRevision 20260903-7
+# InstallerRevision 20260903-8
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$script:InstallerRevision = "20260903-7"
+$script:InstallerRevision = "20260903-8"
 
 if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE "nms-server" }
 if (-not $ShortName) { $ShortName = "NMS" }
@@ -545,14 +545,34 @@ function Build-Server {
   Write-Step "Building server with CMake / Visual Studio"
   $cmake = Find-CMake
   if (-not $cmake) {
-    Die "CMake not found. Install Visual Studio 2022 with the Desktop development with C++ workload."
+    Die "CMake not found. Install Visual Studio (2022 or newer) with the Desktop development with C++ workload."
   }
 
   Push-Location $SourceDir
   try {
-    & $cmake -S . -B Build -G "Visual Studio 17 2022" -A x64 -DEQEMU_BUILD_LOGIN=ON
-    if ($LASTEXITCODE -ne 0) {
-      Die "CMake configure failed"
+    $configured = $false
+    $generators = @(
+      "Visual Studio 18 2026",
+      "Visual Studio 17 2022"
+    )
+    foreach ($gen in $generators) {
+      Write-Step ("Configuring with CMake generator: " + $gen)
+      & $cmake -S . -B Build -G $gen -A x64 -DEQEMU_BUILD_LOGIN=ON
+      if ($LASTEXITCODE -eq 0) {
+        $configured = $true
+        break
+      }
+      Write-WarnMsg ($gen + " failed, trying the next Visual Studio generator")
+    }
+    if (-not $configured) {
+      Write-Step "Configuring with CMake default generator"
+      & $cmake -S . -B Build -A x64 -DEQEMU_BUILD_LOGIN=ON
+      if ($LASTEXITCODE -eq 0) {
+        $configured = $true
+      }
+    }
+    if (-not $configured) {
+      Die "CMake configure failed. Install Visual Studio with Desktop development with C++ and re-run."
     }
     & $cmake --build Build --config Release --parallel $Jobs
     if ($LASTEXITCODE -ne 0) {
