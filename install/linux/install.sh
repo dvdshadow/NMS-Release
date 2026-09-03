@@ -757,6 +757,11 @@ install_quests_and_plugins() {
   sync_tree "${PLUGINS_SRC}" "${NMS_INSTALL_DIR}/quests/plugins"
   # Compatibility path some older layouts expect
   sync_tree "${NMS_INSTALL_DIR}/quests/plugins" "${NMS_INSTALL_DIR}/plugins"
+  # zone's plugin compatibility check looks in lua_modules/ at the server root,
+  # not only under quests/.
+  if [[ -d "${NMS_INSTALL_DIR}/quests/lua_modules" ]]; then
+    ln -sfn quests/lua_modules "${NMS_INSTALL_DIR}/lua_modules"
+  fi
 }
 
 install_assets() {

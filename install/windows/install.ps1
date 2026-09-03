@@ -1,10 +1,10 @@
 # NMS Server Windows installer
 # Double-click install.bat at the repo root.
-# InstallerRevision 20260903-12
+# InstallerRevision 20260903-13
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$script:InstallerRevision = "20260903-12"
+$script:InstallerRevision = "20260903-13"
 
 if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE "nms-server" }
 if (-not $ShortName) { $ShortName = "NMS" }
@@ -1021,6 +1021,26 @@ function Install-QuestsAndPlugins {
   New-Item -ItemType Directory -Force -Path $pluginsDest | Out-Null
   Copy-Tree -From $PluginsSrc -To $pluginsDest
   Copy-Tree -From $pluginsDest -To (Join-Path $InstallDir "plugins")
+  $luaSrc = Join-Path $InstallDir "quests\lua_modules"
+  $luaDst = Join-Path $InstallDir "lua_modules"
+  if (Test-Path $luaSrc) {
+    if (Test-Path $luaDst) {
+      Remove-Item $luaDst -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $linked = $false
+    try {
+      New-Item -ItemType Junction -Path $luaDst -Target $luaSrc | Out-Null
+      $linked = $true
+    } catch {
+      $linked = $false
+    }
+    if ($linked) {
+      Write-Ok "Linked lua_modules to quests\lua_modules"
+    } else {
+      Copy-Tree -From $luaSrc -To $luaDst
+      Write-Ok "Copied lua_modules to the runtime root (zone looks here for CheckHandin)"
+    }
+  }
 }
 
 function Install-Assets {
