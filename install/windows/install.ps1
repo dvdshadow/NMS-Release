@@ -1,10 +1,10 @@
 # NMS Server Windows installer
 # Double-click install.bat at the repo root.
-# InstallerRevision 20260903-9
+# InstallerRevision 20260903-10
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$script:InstallerRevision = "20260903-9"
+$script:InstallerRevision = "20260903-10"
 
 if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE "nms-server" }
 if (-not $ShortName) { $ShortName = "NMS" }
@@ -187,7 +187,7 @@ function Install-Deps {
     return
   }
   if (-not (Test-IsAdmin)) {
-    Write-WarnMsg "Not elevated - cannot auto-install MariaDB/Perl. Re-run as Administrator or pass -SkipDeps after installing them yourself."
+    Write-WarnMsg "Not elevated - cannot auto-install MariaDB. Re-run as Administrator or pass -SkipDeps after installing it yourself."
     return
   }
 
@@ -197,11 +197,9 @@ function Install-Deps {
     if (-not $UseExistingMysql) {
       winget install --id MariaDB.Server -e --accept-package-agreements --accept-source-agreements | Out-Host
     }
-    if (-not (Test-Path "C:\Strawberry\perl\bin\perl.exe")) {
-      winget install --id StrawberryPerl.StrawberryPerl -e --accept-package-agreements --accept-source-agreements | Out-Host
-    }
+    Write-Ok "Skipping system Strawberry Perl. The server build uses EQEmu portable Perl 5.24."
   } else {
-    Write-WarnMsg "winget not found. Install MariaDB 10.6+ and Strawberry Perl manually, then re-run with -SkipDeps -UseExistingMysql"
+    Write-WarnMsg "winget not found. Install MariaDB 10.6+ manually, then re-run with -SkipDeps -UseExistingMysql"
   }
 
   $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
@@ -702,6 +700,29 @@ function Remove-CmakeBuildDir {
   }
 }
 
+function Get-CachedCmakeGenerator {
+  $cache = Join-Path $SourceDir "Build\CMakeCache.txt"
+  if (-not (Test-Path $cache)) {
+    return $null
+  }
+  $hit = Select-String -Path $cache -Pattern "^CMAKE_GENERATOR:INTERNAL=" | Select-Object -First 1
+  if (-not $hit) {
+    return $null
+  }
+  return ($hit.Line -replace "^CMAKE_GENERATOR:INTERNAL=", "").Trim()
+}
+
+function Get-PortablePerlRoot {
+  foreach ($arch in @("x64", "x86")) {
+    $root = Join-Path $SourceDir ("perl\" + $arch)
+    $dll = Join-Path $root "perl\bin\perl524.dll"
+    if (Test-Path $dll) {
+      return $root
+    }
+  }
+  return $null
+}
+
 function Import-VsDevEnvironment {
   param([string]$VsPath)
   if (-not $VsPath) {
@@ -786,7 +807,10 @@ function Build-Server {
   }
 
   $buildDir = Join-Path $SourceDir "Build"
-  Remove-CmakeBuildDir -BuildDir $buildDir
+  $cachedGen = Get-CachedCmakeGenerator
+  if ($cachedGen) {
+    Write-Ok ("Existing CMake cache generator: " + $cachedGen)
+  }
 
   $generators = @(Get-CmakeVisualStudioGenerators -CmakeExe $cmake)
   if ($generators.Count -gt 0) {
@@ -798,6 +822,10 @@ function Build-Server {
   try {
     $configured = $false
     foreach ($gen in $generators) {
+      if ($cachedGen -and ($cachedGen -ne $gen)) {
+        Remove-CmakeBuildDir -BuildDir $buildDir
+        $cachedGen = $null
+      }
       Write-Step ("Configuring with CMake generator: " + $gen)
       & $cmake -S . -B Build -G $gen -A x64 -DEQEMU_BUILD_LOGIN=ON
       if ($LASTEXITCODE -eq 0) {
@@ -806,6 +834,7 @@ function Build-Server {
       }
       Write-WarnMsg ($gen + " failed, trying the next generator")
       Remove-CmakeBuildDir -BuildDir $buildDir
+      $cachedGen = $null
     }
 
     if (-not $configured) {
@@ -1039,11 +1068,32 @@ function Initialize-Spire {
   }
 }
 
+function Write-PerlEnvScript {
+  $perlRoot = Get-PortablePerlRoot
+  $lines = @(
+    "@echo off",
+    "REM Portable Strawberry Perl 5.24 used to compile zone.exe"
+  )
+  if ($perlRoot) {
+    $perlBin = Join-Path $perlRoot "perl\bin"
+    $cBin = Join-Path $perlRoot "c\bin"
+    $lines += ("set `"PATH=" + $perlBin + ";" + $cBin + ";%PATH%`"")
+    $env:Path = $perlBin + ";" + $cBin + ";" + $env:Path
+    Write-Ok ("Perl runtime PATH: " + $perlBin)
+  } else {
+    $lines += "REM portable perl524.dll was not found under Release-NMS-Server\perl"
+    Write-WarnMsg "Portable perl524.dll not found. zone.exe may fail to start until Perl 5.24 is on PATH."
+  }
+  Set-Content -Path (Join-Path $InstallDir "perl_env.bat") -Value $lines -Encoding ASCII
+}
+
 function Write-HelperScripts {
   Write-Step "Writing helper scripts"
+  Write-PerlEnvScript
   $start = @(
     "@echo off",
     "cd /d `"%~dp0`"",
+    "call `"%~dp0perl_env.bat`"",
     "spire.exe eqemu-server:launcher start",
     "echo Server is starting",
     "timeout /T 3 /NOBREAK > nul"
@@ -1051,6 +1101,7 @@ function Write-HelperScripts {
   $stop = @(
     "@echo off",
     "cd /d `"%~dp0`"",
+    "call `"%~dp0perl_env.bat`"",
     "spire.exe eqemu-server:launcher stop",
     "echo Server is stopping",
     "timeout /T 3 /NOBREAK > nul"
@@ -1058,6 +1109,7 @@ function Write-HelperScripts {
   $restart = @(
     "@echo off",
     "cd /d `"%~dp0`"",
+    "call `"%~dp0perl_env.bat`"",
     "spire.exe eqemu-server:launcher restart",
     "echo Server is restarting",
     "timeout /T 3 /NOBREAK > nul"
@@ -1065,6 +1117,7 @@ function Write-HelperScripts {
   $spireStart = @(
     "@echo off",
     "cd /d `"%~dp0`"",
+    "call `"%~dp0perl_env.bat`"",
     "TASKKILL /IM spire.exe /F >nul 2>&1",
     "if not exist logs mkdir logs",
     "start `"NMS Spire`" /min spire.exe",

@@ -19,3 +19,6 @@ out/
 
 # Large vcpkg build archives (>100MB limit on GitHub)
 Release-NMS-Server/vcpkg/vcpkg-export-x64.zip
+
+# Portable Perl downloaded by the Windows MSVC helper
+Release-NMS-Server/perl/

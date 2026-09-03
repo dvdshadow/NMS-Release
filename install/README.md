@@ -92,8 +92,11 @@ behind the scenes.
   Community is enough. You do not need to open the Visual Studio IDE.
 - Internet access (maps ~1 GB, Spire, and first-time CMake deps)
 
-MariaDB and Strawberry Perl are installed automatically via `winget` when
-possible. If winget is unavailable, install them manually and re-run.
+MariaDB is installed automatically via `winget` when possible. The Windows
+build does **not** link against a winget/system Strawberry Perl (5.38/5.40
+headers fail to link with MSVC). CMake downloads EQEmu's portable Strawberry
+Perl **5.24** into `Release-NMS-Server/perl/` and the start scripts put that
+copy on PATH so `zone.exe` can load `perl524.dll`.
 
 ### Advanced / scripted installs
 
