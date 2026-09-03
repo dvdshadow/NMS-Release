@@ -219,18 +219,89 @@ function Install-Deps {
     Write-WarnMsg "MariaDB may be installed, but mysql.exe was not on PATH yet. The next step will search Program Files."
   }
 
-  $services = Get-Service -ErrorAction SilentlyContinue | Where-Object {
+  Start-DatabaseService
+}
+
+function Get-DatabaseServices {
+  return @(Get-Service -ErrorAction SilentlyContinue | Where-Object {
     $_.Name -match "maria|mysql" -or $_.DisplayName -match "MariaDB|MySQL"
+  })
+}
+
+function Test-MysqlPortOpen {
+  param(
+    [string]$TargetHost = "127.0.0.1",
+    [int]$TargetPort = 3306
+  )
+  try {
+    $client = New-Object System.Net.Sockets.TcpClient
+    $iar = $client.BeginConnect($TargetHost, $TargetPort, $null, $null)
+    $ok = $iar.AsyncWaitHandle.WaitOne(500, $false)
+    if (-not $ok) {
+      $client.Close()
+      return $false
+    }
+    $client.EndConnect($iar)
+    $client.Close()
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Start-DatabaseService {
+  $services = Get-DatabaseServices
+  if ($services.Count -eq 0) {
+    Write-WarnMsg "No MariaDB/MySQL Windows service was found yet."
+    return
   }
   foreach ($svc in $services) {
-    if ($svc.Status -ne "Running") {
-      Write-Step ("Starting service " + $svc.Name)
-      try {
-        Start-Service -Name $svc.Name -ErrorAction Stop
-      } catch {
-        Write-WarnMsg ("Could not start " + $svc.Name + ": " + $_)
+    if ($svc.Status -eq "Running") {
+      Write-Ok ("Database service already running: " + $svc.Name)
+      continue
+    }
+    Write-Step ("Starting database service " + $svc.Name)
+    try {
+      Set-Service -Name $svc.Name -StartupType Automatic -ErrorAction SilentlyContinue
+      Start-Service -Name $svc.Name -ErrorAction Stop
+    } catch {
+      Write-WarnMsg ("Start-Service failed for " + $svc.Name + ", trying net start")
+      cmd.exe /c ("net start `"" + $svc.Name + "`"") | Out-Null
+    }
+  }
+}
+
+function Wait-DatabaseReady {
+  param([int]$Seconds = 45)
+  Write-Step ("Waiting up to " + $Seconds + " seconds for MariaDB to accept connections")
+  $elapsed = 0
+  while ($elapsed -lt $Seconds) {
+    $svcRunning = @(Get-DatabaseServices | Where-Object { $_.Status -eq "Running" }).Count -gt 0
+    if ((Test-MysqlPortOpen -TargetHost "127.0.0.1" -TargetPort ([int]$DbPort)) -or $svcRunning) {
+      if (Test-MysqlPortOpen -TargetHost "127.0.0.1" -TargetPort ([int]$DbPort)) {
+        Write-Ok ("MariaDB is listening on 127.0.0.1:" + $DbPort)
+        return $true
       }
     }
+    Start-Sleep -Seconds 2
+    $elapsed += 2
+  }
+  return $false
+}
+
+function Invoke-MysqlExe {
+  param(
+    [string]$MysqlExe,
+    [string[]]$MysqlArgs
+  )
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
+  try {
+    $output = & $MysqlExe @MysqlArgs 2>&1
+    $script:LastMysqlExit = $LASTEXITCODE
+    return $output
+  } finally {
+    $ErrorActionPreference = $old
   }
 }
 
@@ -254,15 +325,41 @@ function Invoke-Mysql {
   if ($Database) {
     $mysqlArgs += $Database
   }
-
   if ($Sql) {
-    $Sql | & $mysql @mysqlArgs
-  } else {
-    & $mysql @mysqlArgs
+    $mysqlArgs += "-e"
+    $mysqlArgs += $Sql
   }
-  if ($LASTEXITCODE -ne 0 -and -not $AllowFailure) {
-    Die ("mysql command failed (exit " + $LASTEXITCODE + ")")
+
+  [void](Invoke-MysqlExe -MysqlExe $mysql -MysqlArgs $mysqlArgs)
+  if ($script:LastMysqlExit -ne 0 -and -not $AllowFailure) {
+    Die ("mysql command failed (exit " + $script:LastMysqlExit + ")")
   }
+}
+
+function Test-MysqlRootLogin {
+  param(
+    [string]$MysqlExe,
+    [string]$Password
+  )
+  $attempts = @(
+    @("-uroot", "-h127.0.0.1", "-P$DbPort", "-e", "SELECT 1"),
+    @("-uroot", "-hlocalhost", "-P$DbPort", "-e", "SELECT 1"),
+    @("-uroot", "-e", "SELECT 1")
+  )
+  if ($Password) {
+    $attempts = @(
+      @("-uroot", "-p$Password", "-h127.0.0.1", "-P$DbPort", "-e", "SELECT 1"),
+      @("-uroot", "-p$Password", "-hlocalhost", "-P$DbPort", "-e", "SELECT 1"),
+      @("-uroot", "-p$Password", "-e", "SELECT 1")
+    ) + $attempts
+  }
+  foreach ($probeArgs in $attempts) {
+    [void](Invoke-MysqlExe -MysqlExe $MysqlExe -MysqlArgs $probeArgs)
+    if ($script:LastMysqlExit -eq 0) {
+      return $true
+    }
+  }
+  return $false
 }
 
 function Configure-Database {
@@ -272,14 +369,24 @@ function Configure-Database {
     Die "mysql client not found. Install MariaDB and re-run."
   }
 
-  $rootPass = $DbRootPassword
-  $probeArgs = @("-uroot", "-h$DbHost", "-P$DbPort", "-e", "SELECT 1")
-  if ($rootPass) {
-    $probeArgs = @("-uroot", "-p$rootPass", "-h$DbHost", "-P$DbPort", "-e", "SELECT 1")
+  Start-DatabaseService
+  if (-not (Wait-DatabaseReady -Seconds 45)) {
+    Write-WarnMsg "MariaDB did not open port 3306 yet. Will still try to log in."
   }
-  & $mysql @probeArgs 2>$null | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    Die "Cannot connect as MySQL root. Set -DbRootPassword or create the database manually."
+
+  $rootPass = $DbRootPassword
+  $loggedIn = $false
+  $tries = 0
+  while (-not $loggedIn -and $tries -lt 8) {
+    $loggedIn = Test-MysqlRootLogin -MysqlExe $mysql -Password $rootPass
+    if (-not $loggedIn) {
+      Start-DatabaseService
+      Start-Sleep -Seconds 3
+      $tries += 1
+    }
+  }
+  if (-not $loggedIn) {
+    Die "Cannot connect to MariaDB on 127.0.0.1:3306. Open Services, start the MariaDB service, then re-run install.bat."
   }
 
   $bootstrap = "CREATE DATABASE IF NOT EXISTS ``$DbName`` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
@@ -301,7 +408,7 @@ function Configure-Database {
   }
 
   $countSql = "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DbName';"
-  $countOut = & $mysql "-u$DbUser" "-p$DbPassword" "-h$DbHost" "-P$DbPort" "-N" "-e" $countSql
+  $countOut = Invoke-MysqlExe -MysqlExe $mysql -MysqlArgs @("-u$DbUser", "-p$DbPassword", "-h$DbHost", "-P$DbPort", "-N", "-e", $countSql)
   $tableCount = 0
   if ($countOut) {
     [void][int]::TryParse((($countOut | Select-Object -First 1).ToString()), [ref]$tableCount)
