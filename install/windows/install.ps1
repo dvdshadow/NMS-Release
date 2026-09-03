@@ -1,10 +1,10 @@
 # NMS Server Windows installer
 # Double-click install.bat at the repo root.
-# InstallerRevision 20260903-6
+# InstallerRevision 20260903-7
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$script:InstallerRevision = "20260903-6"
+$script:InstallerRevision = "20260903-7"
 
 if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE "nms-server" }
 if (-not $ShortName) { $ShortName = "NMS" }
@@ -368,9 +368,20 @@ function Invoke-Mysql {
     Die "mysql client not found on PATH / under Program Files"
   }
 
-  $mysqlArgs = @("-u$User", "-h$DbHost", "-P$DbPort")
-  if ($Password) {
-    $mysqlArgs += "-p$Password"
+  if ($User -eq "root") {
+    $mysqlArgs = @("-uroot")
+    if ($script:RootPassword) {
+      $mysqlArgs += ("-p" + $script:RootPassword)
+    }
+    if ($script:RootHost) {
+      $mysqlArgs += ("-h" + $script:RootHost)
+      $mysqlArgs += ("-P" + $DbPort)
+    }
+  } else {
+    $mysqlArgs = @("-u$User", "-h$DbHost", "-P$DbPort")
+    if ($Password) {
+      $mysqlArgs += "-p$Password"
+    }
   }
   if ($Database) {
     $mysqlArgs += $Database
@@ -380,33 +391,42 @@ function Invoke-Mysql {
     $mysqlArgs += $Sql
   }
 
-  [void](Invoke-MysqlExe -MysqlExe $mysql -MysqlArgs $mysqlArgs)
+  $output = Invoke-MysqlExe -MysqlExe $mysql -MysqlArgs $mysqlArgs
   if ($script:LastMysqlExit -ne 0 -and -not $AllowFailure) {
+    Write-WarnMsg ("mysql said: " + ($output | Out-String))
     Die ("mysql command failed (exit " + $script:LastMysqlExit + ")")
   }
+  return $output
 }
 
-function Test-MysqlRootLogin {
-  param(
-    [string]$MysqlExe,
-    [string]$Password
-  )
-  $attempts = @(
-    @("-uroot", "-h127.0.0.1", "-P$DbPort", "-e", "SELECT 1"),
-    @("-uroot", "-hlocalhost", "-P$DbPort", "-e", "SELECT 1"),
-    @("-uroot", "-e", "SELECT 1")
-  )
-  if ($Password) {
-    $attempts = @(
-      @("-uroot", "-p$Password", "-h127.0.0.1", "-P$DbPort", "-e", "SELECT 1"),
-      @("-uroot", "-p$Password", "-hlocalhost", "-P$DbPort", "-e", "SELECT 1"),
-      @("-uroot", "-p$Password", "-e", "SELECT 1")
-    ) + $attempts
+function Find-MysqlRootLogin {
+  param([string]$MysqlExe)
+  $hosts = @("127.0.0.1", "localhost", "")
+  $passwords = @()
+  if ($DbRootPassword) {
+    $passwords += $DbRootPassword
   }
-  foreach ($probeArgs in $attempts) {
-    [void](Invoke-MysqlExe -MysqlExe $MysqlExe -MysqlArgs $probeArgs)
-    if ($script:LastMysqlExit -eq 0) {
-      return $true
+  $passwords += ""
+
+  foreach ($pass in $passwords) {
+    foreach ($hostName in $hosts) {
+      $probeArgs = @("-uroot")
+      if ($pass) {
+        $probeArgs += ("-p" + $pass)
+      }
+      if ($hostName) {
+        $probeArgs += ("-h" + $hostName)
+        $probeArgs += ("-P" + $DbPort)
+      }
+      $probeArgs += "-e"
+      $probeArgs += "SELECT 1"
+      [void](Invoke-MysqlExe -MysqlExe $MysqlExe -MysqlArgs $probeArgs)
+      if ($script:LastMysqlExit -eq 0) {
+        $script:RootHost = $hostName
+        $script:RootPassword = $pass
+        Write-Ok ("Logged in as MySQL root via host '" + $hostName + "'")
+        return $true
+      }
     }
   }
   return $false
@@ -424,11 +444,12 @@ function Configure-Database {
     Write-WarnMsg "MariaDB did not open port 3306 yet. Will still try to log in."
   }
 
-  $rootPass = $DbRootPassword
+  $script:RootHost = "127.0.0.1"
+  $script:RootPassword = $DbRootPassword
   $loggedIn = $false
   $tries = 0
   while (-not $loggedIn -and $tries -lt 8) {
-    $loggedIn = Test-MysqlRootLogin -MysqlExe $mysql -Password $rootPass
+    $loggedIn = Find-MysqlRootLogin -MysqlExe $mysql
     if (-not $loggedIn) {
       Start-DatabaseService
       Start-Sleep -Seconds 3
@@ -436,21 +457,23 @@ function Configure-Database {
     }
   }
   if (-not $loggedIn) {
-    Die "Cannot connect to MariaDB on 127.0.0.1:3306. Open Services, start the MariaDB service, then re-run install.bat."
+    Die "Cannot connect to MariaDB as root. If you set a root password during the MariaDB installer, re-run and enter that same password."
   }
 
-  $bootstrap = "CREATE DATABASE IF NOT EXISTS ``$DbName`` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-  Invoke-Mysql -User "root" -Password $rootPass -Sql $bootstrap
-  Invoke-Mysql -User "root" -Password $rootPass -Sql ("CREATE USER '" + $DbUser + "'@'localhost' IDENTIFIED BY '" + $DbPassword + "';") -AllowFailure
-  Invoke-Mysql -User "root" -Password $rootPass -Sql ("CREATE USER '" + $DbUser + "'@'%' IDENTIFIED BY '" + $DbPassword + "';") -AllowFailure
-  Invoke-Mysql -User "root" -Password $rootPass -Sql ("ALTER USER '" + $DbUser + "'@'localhost' IDENTIFIED BY '" + $DbPassword + "';") -AllowFailure
-  Invoke-Mysql -User "root" -Password $rootPass -Sql ("ALTER USER '" + $DbUser + "'@'%' IDENTIFIED BY '" + $DbPassword + "';") -AllowFailure
-  $grants = @(
-    ("GRANT ALL PRIVILEGES ON ``" + $DbName + "``.* TO '" + $DbUser + "'@'localhost';"),
-    ("GRANT ALL PRIVILEGES ON ``" + $DbName + "``.* TO '" + $DbUser + "'@'%';"),
-    "FLUSH PRIVILEGES;"
-  ) -join " "
-  Invoke-Mysql -User "root" -Password $rootPass -Sql $grants
+  if ($DbRootPassword -and -not $script:RootPassword) {
+    Invoke-Mysql -User "root" -Sql ("ALTER USER 'root'@'localhost' IDENTIFIED BY '" + $DbRootPassword + "';") -AllowFailure
+    Invoke-Mysql -User "root" -Sql ("SET PASSWORD FOR 'root'@'localhost' = PASSWORD('" + $DbRootPassword + "');") -AllowFailure
+    $script:RootPassword = $DbRootPassword
+  }
+
+  Invoke-Mysql -User "root" -Sql ("CREATE DATABASE IF NOT EXISTS " + $DbName + " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
+  Invoke-Mysql -User "root" -Sql ("CREATE USER '" + $DbUser + "'@'localhost' IDENTIFIED BY '" + $DbPassword + "';") -AllowFailure
+  Invoke-Mysql -User "root" -Sql ("CREATE USER '" + $DbUser + "'@'%' IDENTIFIED BY '" + $DbPassword + "';") -AllowFailure
+  Invoke-Mysql -User "root" -Sql ("ALTER USER '" + $DbUser + "'@'localhost' IDENTIFIED BY '" + $DbPassword + "';") -AllowFailure
+  Invoke-Mysql -User "root" -Sql ("ALTER USER '" + $DbUser + "'@'%' IDENTIFIED BY '" + $DbPassword + "';") -AllowFailure
+  Invoke-Mysql -User "root" -Sql ("GRANT ALL PRIVILEGES ON " + $DbName + ".* TO '" + $DbUser + "'@'localhost';")
+  Invoke-Mysql -User "root" -Sql ("GRANT ALL PRIVILEGES ON " + $DbName + ".* TO '" + $DbUser + "'@'%';") -AllowFailure
+  Invoke-Mysql -User "root" -Sql "FLUSH PRIVILEGES;"
 
   if ($SkipDbImport) {
     Write-WarnMsg "Skipping database import"
