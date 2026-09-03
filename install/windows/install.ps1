@@ -136,24 +136,50 @@ function Require-RepoLayout {
   }
 }
 
+function Add-MysqlBinToPath {
+  param([string]$MysqlExe)
+  if (-not $MysqlExe) {
+    return
+  }
+  $binDir = Split-Path -Parent $MysqlExe
+  if ($env:Path -notlike ("*" + $binDir + "*")) {
+    $env:Path = $binDir + ";" + $env:Path
+  }
+}
+
 function Get-MysqlExe {
-  $programFiles = ${env:ProgramFiles}
-  $candidates = @(
-    "mysql",
-    (Join-Path $programFiles "MariaDB 11.4\bin\mysql.exe"),
-    (Join-Path $programFiles "MariaDB 11.3\bin\mysql.exe"),
-    (Join-Path $programFiles "MariaDB 10.11\bin\mysql.exe"),
-    (Join-Path $programFiles "MariaDB 10.6\bin\mysql.exe"),
-    (Join-Path $programFiles "MySQL\MySQL Server 8.0\bin\mysql.exe")
-  )
-  foreach ($candidate in $candidates) {
-    if ($candidate -eq "mysql") {
-      $cmd = Get-Command mysql -ErrorAction SilentlyContinue
-      if ($cmd) {
-        return $cmd.Source
+  $cmd = Get-Command mysql -ErrorAction SilentlyContinue
+  if ($cmd) {
+    Add-MysqlBinToPath $cmd.Source
+    return $cmd.Source
+  }
+  $cmd = Get-Command mariadb -ErrorAction SilentlyContinue
+  if ($cmd) {
+    Add-MysqlBinToPath $cmd.Source
+    return $cmd.Source
+  }
+
+  $roots = @()
+  if (${env:ProgramFiles}) { $roots += ${env:ProgramFiles} }
+  if (${env:ProgramFiles(x86)}) { $roots += ${env:ProgramFiles(x86)} }
+  if (${env:ProgramW6432}) { $roots += ${env:ProgramW6432} }
+  $roots = $roots | Select-Object -Unique
+
+  foreach ($root in $roots) {
+    $dirs = @()
+    $dirs += Get-ChildItem -Path $root -Directory -Filter "MariaDB*" -ErrorAction SilentlyContinue
+    $mysqlRoot = Join-Path $root "MySQL"
+    if (Test-Path $mysqlRoot) {
+      $dirs += Get-ChildItem -Path $mysqlRoot -Directory -Filter "MySQL Server*" -ErrorAction SilentlyContinue
+    }
+    foreach ($dir in $dirs) {
+      foreach ($exeName in @("mysql.exe", "mariadb.exe")) {
+        $exe = Join-Path $dir.FullName ("bin\" + $exeName)
+        if (Test-Path $exe) {
+          Add-MysqlBinToPath $exe
+          return $exe
+        }
       }
-    } elseif (Test-Path $candidate) {
-      return $candidate
     }
   }
   return $null
@@ -185,6 +211,27 @@ function Install-Deps {
   $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
   $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
   $env:Path = $machinePath + ";" + $userPath
+
+  $mysqlExe = Get-MysqlExe
+  if ($mysqlExe) {
+    Write-Ok ("Found MariaDB/MySQL client: " + $mysqlExe)
+  } else {
+    Write-WarnMsg "MariaDB may be installed, but mysql.exe was not on PATH yet. The next step will search Program Files."
+  }
+
+  $services = Get-Service -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -match "maria|mysql" -or $_.DisplayName -match "MariaDB|MySQL"
+  }
+  foreach ($svc in $services) {
+    if ($svc.Status -ne "Running") {
+      Write-Step ("Starting service " + $svc.Name)
+      try {
+        Start-Service -Name $svc.Name -ErrorAction Stop
+      } catch {
+        Write-WarnMsg ("Could not start " + $svc.Name + ": " + $_)
+      }
+    }
+  }
 }
 
 function Invoke-Mysql {
