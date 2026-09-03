@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions
 REM =============================================================================
-REM  NMS Server — Windows one-click installer
+REM  NMS Server - Windows one-click installer
 REM
 REM  Double-click this file after downloading/cloning the repo.
 REM  It will ask for Administrator permission (UAC), then walk you through
