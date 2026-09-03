@@ -1,36 +1,26 @@
-﻿#Requires -Version 5.1
-# NMS Server Windows installer (ASCII-only so Windows PowerShell 5.1 can parse it).
-# Double-click install.bat at the repo root. You do not need to run this file by hand.
-# InstallerRevision 20260903-5
-
-[CmdletBinding()]
-param(
-  [string]$InstallDir = $(Join-Path $env:USERPROFILE "nms-server"),
-  [string]$ShortName = "NMS",
-  [string]$LongName = "NMS Community Release",
-  [string]$DbHost = "127.0.0.1",
-  [string]$DbPort = "3306",
-  [string]$DbName = "nms",
-  [string]$DbUser = "nms",
-  [string]$DbPassword = "",
-  [string]$DbRootPassword = "",
-  [string]$SpireUser = "admin",
-  [string]$SpirePassword = "",
-  [int]$SpirePort = 3000,
-  [string]$PublicAddress = "127.0.0.1",
-  [string]$LocalAddress = "127.0.0.1",
-  [switch]$SkipDeps,
-  [switch]$SkipBuild,
-  [switch]$SkipMaps,
-  [switch]$SkipDbImport,
-  [switch]$UseExistingMysql,
-  [switch]$NonInteractive,
-  [int]$Jobs = [Environment]::ProcessorCount
-)
+# NMS Server Windows installer
+# Double-click install.bat at the repo root.
+# InstallerRevision 20260903-6
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$script:InstallerRevision = "20260903-5"
+$script:InstallerRevision = "20260903-6"
+
+if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE "nms-server" }
+if (-not $ShortName) { $ShortName = "NMS" }
+if (-not $LongName) { $LongName = "NMS Community Release" }
+if (-not $DbHost) { $DbHost = "127.0.0.1" }
+if (-not $DbPort) { $DbPort = "3306" }
+if (-not $DbName) { $DbName = "nms" }
+if (-not $DbUser) { $DbUser = "nms" }
+if (-not $DbPassword) { $DbPassword = "" }
+if (-not $DbRootPassword) { $DbRootPassword = "" }
+if (-not $SpireUser) { $SpireUser = "admin" }
+if (-not $SpirePassword) { $SpirePassword = "" }
+if (-not $SpirePort) { $SpirePort = 3000 }
+if (-not $PublicAddress) { $PublicAddress = "127.0.0.1" }
+if (-not $LocalAddress) { $LocalAddress = "127.0.0.1" }
+if (-not $Jobs) { $Jobs = [Environment]::ProcessorCount }
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
