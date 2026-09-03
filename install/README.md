@@ -25,11 +25,17 @@ The runtime layout Spire expects (`bin/`, `quests/`, `maps/`, `eqemu_config.json
 
 ## Linux
 
+Works on a **basic headless** Debian/Ubuntu or RHEL/Fedora box (no GUI). The
+script installs compilers, CMake, MariaDB, Perl, and Lua via the package
+manager. Visual Studio / PowerShell / Strawberry Perl issues from Windows do
+not apply here; Linux links against distro `libperl`.
+
 ### Requirements
 
-- Debian/Ubuntu or RHEL/Fedora-family
-- `sudo` for the first run (packages + MariaDB)
+- Debian/Ubuntu or RHEL/Fedora-family (cloud/minimal images are fine)
+- `sudo` or root for the first run (packages + MariaDB)
 - Several GB free disk (maps alone are ~1 GB; build artifacts more)
+- A `git clone --recursive` (GitHub zip downloads omit C++ submodules)
 
 ### Run
 
@@ -39,6 +45,10 @@ From the repository root:
 chmod +x install.sh install/linux/install.sh
 sudo ./install.sh
 ```
+
+As root the default runtime folder is `/opt/nms-server` (not `/root/nms-server`).
+On a machine with no TTY (cloud-init, piped SSH) the installer switches to
+non-interactive defaults automatically.
 
 Or directly:
 
@@ -61,11 +71,20 @@ See `./install/linux/install.sh --help` for the full list.
 ### After install
 
 ```bash
-cd ~/nms-server   # or your --install-dir
-./spire_start     # web UI on http://127.0.0.1:3000
-./start           # starts world/zone/ucs/loginserver via Spire
+cd /opt/nms-server   # or ~/nms-server if you installed as a normal user
+./spire_start
+./start
 ./stop
 ```
+
+There is no desktop browser on a headless host. Tunnel Spire if you need the UI:
+
+```bash
+ssh -N -L 3000:127.0.0.1:3000 user@your-server
+```
+
+Then open `http://127.0.0.1:3000/admin` on your own machine. Do not expose
+Spire to the public internet.
 
 Passwords and paths are written to `install_config.yaml` in the install folder.
 

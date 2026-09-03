@@ -43,7 +43,7 @@ ready-to-run server folder with start/stop helpers.
 
 | Platform | Command |
 | --- | --- |
-| **Linux** | `sudo ./install.sh` |
+| **Linux** | `sudo ./install.sh` (headless/minimal images OK; default runtime `/opt/nms-server`) |
 | **Windows** | Double-click `install.bat` (approve the UAC prompt) |
 
 Full options, layout notes, and post-install steps:
