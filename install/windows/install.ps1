@@ -1,10 +1,10 @@
 # NMS Server Windows installer
 # Double-click install.bat at the repo root.
-# InstallerRevision 20260903-10
+# InstallerRevision 20260903-11
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$script:InstallerRevision = "20260903-10"
+$script:InstallerRevision = "20260903-11"
 
 if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE "nms-server" }
 if (-not $ShortName) { $ShortName = "NMS" }
@@ -1090,10 +1090,18 @@ function Write-PerlEnvScript {
 function Write-HelperScripts {
   Write-Step "Writing helper scripts"
   Write-PerlEnvScript
+  foreach ($helper in @("start_database.bat", "start_database.ps1")) {
+    $src = Join-Path $ScriptDir $helper
+    if (Test-Path $src) {
+      Copy-Item $src (Join-Path $InstallDir $helper) -Force
+    }
+  }
   $start = @(
     "@echo off",
     "cd /d `"%~dp0`"",
     "call `"%~dp0perl_env.bat`"",
+    "call `"%~dp0start_database.bat`"",
+    "if errorlevel 1 exit /b 1",
     "spire.exe eqemu-server:launcher start",
     "echo Server is starting",
     "timeout /T 3 /NOBREAK > nul"
@@ -1110,6 +1118,8 @@ function Write-HelperScripts {
     "@echo off",
     "cd /d `"%~dp0`"",
     "call `"%~dp0perl_env.bat`"",
+    "call `"%~dp0start_database.bat`"",
+    "if errorlevel 1 exit /b 1",
     "spire.exe eqemu-server:launcher restart",
     "echo Server is restarting",
     "timeout /T 3 /NOBREAK > nul"
@@ -1118,6 +1128,12 @@ function Write-HelperScripts {
     "@echo off",
     "cd /d `"%~dp0`"",
     "call `"%~dp0perl_env.bat`"",
+    "call `"%~dp0start_database.bat`"",
+    "if errorlevel 1 (",
+    "  echo.",
+    "  pause",
+    "  exit /b 1",
+    ")",
     "TASKKILL /IM spire.exe /F >nul 2>&1",
     "if not exist logs mkdir logs",
     "start `"NMS Spire`" /min spire.exe",

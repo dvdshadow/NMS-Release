@@ -132,7 +132,7 @@ In `%USERPROFILE%\nms-server` (or your chosen install folder), double-click:
 
 | Script | Purpose |
 | --- | --- |
-| `spire_start.bat` | Starts Spire (web admin) |
+| `spire_start.bat` | Starts MariaDB if needed, then Spire (web admin) |
 | `spire_web_admin.bat` | Opens `http://127.0.0.1:3000/admin` |
 | `server_start.bat` | Starts the game server via Spire |
 | `server_stop.bat` | Stops the game server |

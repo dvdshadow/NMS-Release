@@ -885,9 +885,29 @@ init_spire() {
 
 write_helper_scripts() {
   log "Writing helper scripts"
+  cat > "${NMS_INSTALL_DIR}/start_database" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "Starting MariaDB/MySQL if needed..."
+if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+  sudo systemctl start mariadb 2>/dev/null || sudo systemctl start mysql 2>/dev/null || true
+elif command -v service >/dev/null 2>&1; then
+  sudo service mariadb start 2>/dev/null || sudo service mysql start 2>/dev/null || true
+fi
+for i in $(seq 1 30); do
+  if bash -c "echo >/dev/tcp/127.0.0.1/3306" >/dev/null 2>&1; then
+    echo "MariaDB is listening on 127.0.0.1:3306"
+    exit 0
+  fi
+  sleep 1
+done
+echo "Port 3306 is still closed. Start MariaDB (sudo systemctl start mariadb) and retry."
+exit 1
+EOF
   cat > "${NMS_INSTALL_DIR}/start" <<'EOF'
 #!/usr/bin/env bash
 cd "$(dirname "$0")"
+./start_database || exit 1
 ./spire eqemu-server:launcher start && echo "Server started"
 EOF
   cat > "${NMS_INSTALL_DIR}/stop" <<'EOF'
@@ -899,12 +919,14 @@ EOF
   cat > "${NMS_INSTALL_DIR}/restart" <<'EOF'
 #!/usr/bin/env bash
 cd "$(dirname "$0")"
+./start_database || exit 1
 ./spire eqemu-server:launcher restart
 echo "Server restarting"
 EOF
   cat > "${NMS_INSTALL_DIR}/spire_start" <<EOF
 #!/usr/bin/env bash
 cd "\$(dirname "\$0")"
+./start_database || exit 1
 mkdir -p logs
 if pgrep -f '[.]/spire\$|spire\$' >/dev/null 2>&1; then
   echo "Spire already running"
@@ -935,7 +957,7 @@ if command -v xdg-open >/dev/null 2>&1; then
 fi
 echo "\$url"
 EOF
-  chmod 755 "${NMS_INSTALL_DIR}/"{start,stop,restart,spire_start,spire_stop,spire_web,spire_web_admin}
+  chmod 755 "${NMS_INSTALL_DIR}/"{start,stop,restart,start_database,spire_start,spire_stop,spire_web,spire_web_admin}
 }
 
 write_install_config() {
